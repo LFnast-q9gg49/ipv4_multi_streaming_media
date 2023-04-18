@@ -22,12 +22,13 @@ public:
     struct msg_channel_st {
         chnid_t chnid; // must between min_channel and max_channel
         uint8_t data[1]; // variable length
-    } (packed);
+    } __attribute__((packed));
 
     struct msg_list_entry_st {
         chnid_t chnid;
+        uint16_t desc_len;
         uint8_t desc[1];
-    } (packed);
+    } __attribute__((packed));
 
     /* example:
      * 1. music: xxxxxxxxxxxxxxxxxxxxxx
@@ -38,7 +39,7 @@ public:
     struct msg_list_st {
         chnid_t chnid; // must be list_channel
         msg_list_entry_st entry[1]; // variable length
-    } (packed);
+    } __attribute__((packed));
 
 };
 

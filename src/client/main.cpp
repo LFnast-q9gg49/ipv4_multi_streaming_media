@@ -45,10 +45,12 @@ int main(int argc, char *argv[]) {
      * */
     int pd[2];
     pid_t pid;
-    int index, ret, sid, loop = 1;
+    ssize_t len;
+    int index, ret, sid, loop = 1, chosen_id;
     struct ip_mreqn mreq{};
-    struct sockaddr_in laddr{};
-
+    struct sockaddr_in laddr{}, raddr{};
+    socklen_t raddr_len = sizeof(raddr);
+    struct proto::msg_list_st *list = (struct proto::msg_list_st *)malloc(max_msg_size);
 
     struct option arg_arr[] = {
             {"mgroup", 1, nullptr, 'M'},
@@ -136,23 +138,58 @@ int main(int argc, char *argv[]) {
         close(sid);
         close(pd[1]); // close write
         dup2(pd[0], STDIN_FILENO); // redirect stdin to pipe
-        close(pd[0]);
+        if (pd[0] != STDIN_FILENO) {
+            close(pd[0]);
+        }
 
         // exec mpeg
-
+        if (execl("/bin/sh", "sh", "-c", client_conf.player_cmd, nullptr) < 0) {
+            perror("execl");
+            exit(1);
+        }
     }
 
     // parent
     close(pd[0]); // close read
 
-    /*
+
     while (true) {
         // rcv list
+        if (list == nullptr) {
+            perror("malloc");
+            exit(1);
+        }
 
-
-        // choose channel
-        // rcv chosen channel, and write to pipe
+        ssize_t len = recvfrom(sid, list, max_msg_size, 0, reinterpret_cast<sockaddr *>(&raddr), &raddr_len);
+        if (len < sizeof(struct proto::msg_list_st)) {
+            fprintf(stderr, "message too short");
+            exit(1);
+        }
+        if (list->chnid != list_channel) {
+            fprintf(stderr, "message not list");
+            exit(1);
+        }
+        break;
     }
-     */
+    // print list
+    struct proto::msg_list_entry_st *pos;
+    for (pos = list->entry; pos < (proto::msg_list_entry_st *)((char *)list + len); pos = reinterpret_cast<proto::msg_list_entry_st *>((char *) pos + ntohs(pos->desc_len))) {
+        fprintf(stdout, "channel %d : %s\n", pos->chnid, pos->desc);
+    }
+
+    free(list);
+
+    // choose channel
+    while (true) {
+        fprintf(stdout, "choose channel id : \n");
+        int tmp = scanf("%d", &chosen_id);
+        if (tmp != 1){
+            exit(1);
+        }
+    }
+
+    // rcv chosen channel, and write to pipe
+
+
     exit(0);
 }
