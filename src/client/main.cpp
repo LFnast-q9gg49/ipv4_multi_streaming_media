@@ -21,12 +21,11 @@
  * -H --help    help
  * */
 
-static char *DEFAULT_PLAYER = "/usr/bin/mpg123 > /dev/null 2>&1";
 
 struct client::client_conf_st client_conf = {
         .rcvport = default_port,
         .mgroup = DEFAULT_MGROUP,
-        .player_cmd = DEFAULT_PLAYER
+        .player_cmd = DEFAULT_PLAYER_CMD,
 };
 
 static void usage() {
@@ -44,8 +43,9 @@ int main(int argc, char *argv[]) {
      * environment,
      * command line
      * */
+    int pd[2];
     pid_t pid;
-    int index, ret, sid;
+    int index, ret, sid, loop = 1;
     struct ip_mreqn mreq{};
     struct sockaddr_in laddr{};
 
@@ -102,9 +102,15 @@ int main(int argc, char *argv[]) {
     }
 
     if (setsockopt(sid, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
-        perror("setsockopt");
+        perror("setsockopt ADD_MEMBERSHIP");
         exit(1);
     }
+
+    if (setsockopt(sid, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) < 0) {
+        perror("setsockopt MULTICAST_LOOP");
+        exit(1);
+    }
+
 
     laddr.sin_family = AF_INET;
     laddr.sin_port = htons(client_conf.rcvport);
@@ -114,7 +120,10 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    pipe();
+    if (pipe(pd) < 0) {
+        perror("pipe");
+        exit(1);
+    }
 
     pid = fork();
 
@@ -123,21 +132,27 @@ int main(int argc, char *argv[]) {
         exit(1);
     } else if (pid == 0) {
         // child
-        close(0);
-        close(1);
-        close(2);
-        setsid();
-        chdir("/");
-        umask(0);
-        int fd = open("/dev/null", O_RDWR);
-        dup(fd);
-        dup(fd);
-        close(fd);
+
+        close(sid);
+        close(pd[1]); // close write
+        dup2(pd[0], STDIN_FILENO); // redirect stdin to pipe
+        close(pd[0]);
+
         // exec mpeg
+
     }
 
     // parent
+    close(pd[0]); // close read
+
+    /*
+    while (true) {
+        // rcv list
 
 
+        // choose channel
+        // rcv chosen channel, and write to pipe
+    }
+     */
     exit(0);
 }
