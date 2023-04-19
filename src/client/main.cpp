@@ -1,14 +1,12 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cerrno>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <getopt.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
-#include <fcntl.h>
 
 
 #include "client.h"
@@ -35,6 +33,23 @@ static void usage() {
                     "-H --help    help\n");
 }
 
+static ssize_t writen(int fd, const void *buf, size_t count) {
+    ssize_t ret, pos;
+    while (true) {
+        ret = write(fd, (char *) buf + pos, count);
+        if (ret < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("write");
+            return -1;
+        }
+        count -= ret;
+        pos += ret;
+    }
+    return pos;
+}
+
 int main(int argc, char *argv[]) {
     /*
      * init level :
@@ -48,9 +63,10 @@ int main(int argc, char *argv[]) {
     ssize_t len;
     int index, ret, sid, loop = 1, chosen_id;
     struct ip_mreqn mreq{};
-    struct sockaddr_in laddr{}, raddr{};
+    struct sockaddr_in laddr{}, raddr{}, araddr{};
     socklen_t raddr_len = sizeof(raddr);
-    struct proto::msg_list_st *list = (struct proto::msg_list_st *)malloc(max_msg_size);
+    socklen_t araddr_len = sizeof(araddr);
+    auto *list = (struct proto::msg_list_st *) malloc(max_msg_size);
 
     struct option arg_arr[] = {
             {"mgroup", 1, nullptr, 'M'},
@@ -160,7 +176,7 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
 
-        ssize_t len = recvfrom(sid, list, max_msg_size, 0, reinterpret_cast<sockaddr *>(&raddr), &raddr_len);
+        len = recvfrom(sid, list, max_msg_size, 0, reinterpret_cast<sockaddr *>(&raddr), &raddr_len);
         if (len < sizeof(struct proto::msg_list_st)) {
             fprintf(stderr, "message too short");
             exit(1);
@@ -173,7 +189,9 @@ int main(int argc, char *argv[]) {
     }
     // print list
     struct proto::msg_list_entry_st *pos;
-    for (pos = list->entry; pos < (proto::msg_list_entry_st *)((char *)list + len); pos = reinterpret_cast<proto::msg_list_entry_st *>((char *) pos + ntohs(pos->desc_len))) {
+    for (pos = list->entry;
+         pos < (proto::msg_list_entry_st *) ((char *) list + len); pos = reinterpret_cast<proto::msg_list_entry_st *>(
+            (char *) pos + ntohs(pos->desc_len))) {
         fprintf(stdout, "channel %d : %s\n", pos->chnid, pos->desc);
     }
 
@@ -183,13 +201,43 @@ int main(int argc, char *argv[]) {
     while (true) {
         fprintf(stdout, "choose channel id : \n");
         int tmp = scanf("%d", &chosen_id);
-        if (tmp != 1){
+        if (tmp != 1) {
             exit(1);
         }
+        break;
     }
 
     // rcv chosen channel, and write to pipe
+    auto *chn = (struct proto::msg_channel_st *) malloc(max_msg_size);
+    if (chn == nullptr) {
+        perror("malloc");
+        exit(1);
+    }
 
+    while (true) {
+        len = recvfrom(sid, chn, max_msg_size, 0, reinterpret_cast<sockaddr *>(&araddr), &araddr_len);
+        if (araddr.sin_addr.s_addr != raddr.sin_addr.s_addr || araddr.sin_port != raddr.sin_port) {
+            fprintf(stderr, "message from unknown source");
+            continue;
+        }
+
+        if (len < sizeof(struct proto::msg_channel_st)) {
+            fprintf(stderr, "message too short");
+            continue;
+        }
+
+        if (chn->chnid == chosen_id) {
+            fprintf(stdout, "accept msg: %d\n", chn->chnid);
+            if (writen(pd[1], chn->data, len - sizeof(chnid_t)) < 0) {
+                perror("writen");
+                exit(1);
+            }
+        }
+
+    }
+
+    free(chn);
+    close(sid);
 
     exit(0);
 }
